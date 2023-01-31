@@ -1,0 +1,4 @@
+name: MysterChat
+version: '${project.version}'
+main: com.mystermc.mysterchat.main.MysterChat
+depend: [MysterCore]
