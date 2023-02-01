@@ -5,12 +5,9 @@ import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
 import com.mystermc.mysterchat.main.MysterChat;
 import com.mystermc.mysterchat.utils.Util;
-import com.mystermc.mystercore.utils.CoreAPI;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.io.*;
 import java.util.ArrayList;
@@ -21,7 +18,7 @@ public class StaffChatManager {
     private final MysterChat instance;
     private String onlinePName;
     private final List<UUID> toggledPlayers = new ArrayList<>();
-    private final List<UUID> alertsOff = new ArrayList<>();
+    private final List<String> alertsOff = new ArrayList<>();
 
     public StaffChatManager(MysterChat instance) {
         this.instance = instance;
@@ -43,27 +40,29 @@ public class StaffChatManager {
 
         } else if(event.getMessage().equalsIgnoreCase("@alerts")) {
             if (player.hasPermission("mystermc.staff.sc.alerts")) {
-                if (alertsOff.contains(player.getUniqueId())) {
-                    alertsOff.remove(player.getUniqueId());
+                if (alertsOff.contains(player.getName())) {
+                    alertsOff.remove(player.getName());
+                    syncPlayerAlertSetting(player.getName(), player, "REMOVE");
                     event.setCancelled(true);
                     player.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &b&l" + "Turned on staff chat alerts"));
                 } else {
-                    alertsOff.add(player.getUniqueId());
+                    alertsOff.add(player.getName());
+                    syncPlayerAlertSetting(player.getName(), player, "ADD");
                     event.setCancelled(true);
                     player.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &b&l" + "Turned off staff chat alerts"));
                 }
             }
         } else if (event.getMessage().startsWith("@")) {
             event.setCancelled(true);
-            if (alertsOff.contains(player.getUniqueId())) {
+            if (alertsOff.contains(player.getName())) {
                 player.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &c" + "Your staff chat alerts are off. Please turn them on to send a message."));
                 return;
             }
             sendStaffChatMessage(event.getMessage(), player.getName());
             forwardPluginMessage(event.getMessage(), event.getPlayer().getServer().getServerName(), event.getPlayer(), false);
-        }  else if (toggledPlayers.contains(player.getUniqueId())) {
+        }  else if (toggledPlayers.contains(player.getName())) {
             event.setCancelled(true);
-            if (alertsOff.contains(player.getUniqueId())) {
+            if (alertsOff.contains(player.getName())) {
                 player.sendMessage(Util.color( "Your staff chat alerts are off. Please turn them on to send a message."));
                 return;
             }
@@ -87,7 +86,7 @@ public class StaffChatManager {
     public void sendStaffChatMessage(String msg, String playerName) {
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (p.hasPermission("mystermc.staff.sc.chat")) {
-                if (alertsOff.contains(p.getUniqueId())) {
+                if (alertsOff.contains(p.getName())) {
                     return;
                 } else {
                     p.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &c&l" + playerName + "&o&e: " + p.getServer().getServerName() + "&8 > &b" + msg.substring(1)));
@@ -99,8 +98,12 @@ public class StaffChatManager {
     public void sendStaffChatMessage(String msg, String server, String playerName) {
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (p.hasPermission("mystermc.staff.sc.chat")) {
-                p.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &c&l" + playerName + "&o&e: " + server + "&8 > &b" + msg.substring(1)));
-            }
+                if (alertsOff.contains(p.getName())) {
+                    return;
+                } else {
+                    p.sendMessage(Util.color("&8&l[&r&cS&r&8&l]&r &c&l" + playerName + "&o&e: " + server + "&8 > &b" + msg.substring(1)));
+                }
+                }
         }
     }
 
@@ -126,12 +129,59 @@ public class StaffChatManager {
         out.write(data);
         player.sendPluginMessage(instance, "BungeeCord", out.toByteArray());
     }
+
+    public void syncPlayerAlertSetting(String name, Player player, String action) {
+        ByteArrayDataOutput out = ByteStreams.newDataOutput();
+        out.writeUTF("Forward");
+        out.writeUTF("ONLINE");
+        out.writeUTF("StaffChatSettingSync");
+        ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+        DataOutputStream dataStream = new DataOutputStream(byteStream);
+        try {
+            dataStream.writeUTF(name);
+            dataStream.writeUTF(action);
+        } catch (IOException e) {
+            e.printStackTrace();
+            instance.getLogger().severe("Failed to send plugin message to bungeecord");
+            return;
+        }
+        byte[] data = byteStream.toByteArray();
+        out.writeShort(data.length);
+        out.write(data);
+        player.sendPluginMessage(instance, "BungeeCord", out.toByteArray());
+    }
+
     public void onPluginMessageReceived(String channel, byte[] message) {
         if (!channel.equals("BungeeCord")) {
             return;
         }
         ByteArrayDataInput in = ByteStreams.newDataInput(message);
         String subChannel = in.readUTF();
+        if (subChannel.equals("StaffChatSettingSync")) {
+            short len = in.readShort();
+            byte[] msgbytes = new byte[len];
+            in.readFully(msgbytes);
+
+            DataInputStream msgin = new DataInputStream(new ByteArrayInputStream(msgbytes));
+            String name;
+            String action;
+            try {
+                name = msgin.readUTF();
+                action = msgin.readUTF();
+            } catch (IOException e) {
+                e.printStackTrace();
+                instance.getLogger().severe("Failed to read plugin message from bungeecord");
+                return;
+            }
+            if (action.equals("REMOVE")) {
+                alertsOff.remove(name);
+            } else if (action.equals("ADD")) {
+                alertsOff.add(name);
+            } else {
+            }
+
+            return;
+        }
         if (!subChannel.equals("StaffChat")) {
             return;
         }

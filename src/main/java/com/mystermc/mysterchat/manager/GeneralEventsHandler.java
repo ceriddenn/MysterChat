@@ -13,6 +13,7 @@ public class GeneralEventsHandler {
     }
 
     public static void handlePlayerConnect(Player player) {
+        // add bukkit scheduler
         String serverName = player.getServer().getServerName();
         String joinMessage = "&8&l[&r&cS&r&8&l]&r &e&l" + serverName + "&8 (&c&l STAFF: &r&b" + player.getName() + " joined the network! &8)";
         manager.sendCustomStaffChatMessage(joinMessage);
